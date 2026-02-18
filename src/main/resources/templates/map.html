@@ -1,0 +1,13 @@
+<button onclick="callPing()">Call /api/ping with token</button>
+<pre id="pingResult"></pre>
+
+<script>
+    async function callPing() {
+        const token = localStorage.getItem("idToken");
+        const res = await fetch("/api/ping", {
+            headers: { "Authorization": "Bearer " + token }
+        });
+        document.getElementById("pingResult").innerText =
+            "Status: " + res.status + "\nBody: " + await res.text();
+    }
+</script>

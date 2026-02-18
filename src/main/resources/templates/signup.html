@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sign Up</title>
+</head>
+<body>
+
+<h2>Sign Up</h2>
+
+<input type="email" id="email" placeholder="Email"><br><br>
+<input type="password" id="password" placeholder="Password"><br><br>
+
+<button onclick="signup()">Create Account</button>
+
+<p id="error" style="color:red;"></p>
+<p id="ok" style="color:green;"></p>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import { getAuth, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyB-zBc1S4YbpckOkBEluMGijCpkanOPojw",
+        authDomain: "driveza-cde9b.firebaseapp.com",
+        projectId: "driveza-cde9b",
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+
+    window.signup = async function () {
+        const email = document.getElementById("email").value;
+        const password = document.getElementById("password").value;
+
+        document.getElementById("error").innerText = "";
+        document.getElementById("ok").innerText = "";
+
+        try {
+            const cred = await createUserWithEmailAndPassword(auth, email, password);
+            const token = await cred.user.getIdToken();
+            localStorage.setItem("idToken", token);
+
+            document.getElementById("ok").innerText = "Account created! Redirecting...";
+            window.location.href = "/map";
+        } catch (e) {
+            document.getElementById("error").innerText = e.message;
+        }
+    }
+</script>
+
+</body>
+</html>
