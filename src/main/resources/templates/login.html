@@ -1,14 +1,17 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Login</title>
+    <title>Driveza - Login</title>
 </head>
 <body>
 
 <h2>Login</h2>
 
-<input type="email" id="email" placeholder="Email"><br><br>
-<input type="password" id="password" placeholder="Password"><br><br>
+<label>Email:</label><br>
+<input type="email" id="email" placeholder="Enter email"><br><br>
+
+<label>Password:</label><br>
+<input type="password" id="password" placeholder="Enter password"><br><br>
 
 <button onclick="login()">Login</button>
 
@@ -18,6 +21,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
+    // 🔥 YOUR Firebase config (must match signup page exactly)
     const firebaseConfig = {
         apiKey: "AIzaSyB-zBc1S4YbpckOkBEluMGijCpkanOPojw",
         authDomain: "driveza-cde9b.firebaseapp.com",
@@ -28,18 +32,27 @@
     const auth = getAuth(app);
 
     window.login = async function () {
-        const email = document.getElementById("email").value;
+
+        const email = document.getElementById("email").value.trim();
         const password = document.getElementById("password").value;
+
+        document.getElementById("error").innerText = "";
 
         try {
             const userCredential = await signInWithEmailAndPassword(auth, email, password);
-            const token = await userCredential.user.getIdToken();
+
+            // 🔁 Get fresh token (important)
+            const token = await userCredential.user.getIdToken(true);
 
             localStorage.setItem("idToken", token);
 
             window.location.href = "/map";
+
         } catch (error) {
-            document.getElementById("error").innerText = error.message;
+            console.error("Firebase login error:", error);
+
+            document.getElementById("error").innerText =
+                (error.code || "") + " | " + (error.message || "");
         }
     }
 </script>

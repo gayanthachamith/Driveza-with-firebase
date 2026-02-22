@@ -1,13 +1,388 @@
-<button onclick="callPing()">Call /api/ping with token</button>
-<pre id="pingResult"></pre>
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <title>Driveza - Map</title>
+    <style>
+        #map { width: 100%; height: 420px; border: 1px solid #ddd; margin-top: 10px; }
+        .card { border:1px solid #ddd; padding:12px; margin-bottom:10px; }
+        .controls { margin-top: 12px; padding: 12px; border: 1px solid #ddd; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+        input, select, button { padding: 6px; }
+    </style>
+</head>
+<body style="font-family: Arial, sans-serif; margin: 18px;">
+
+<h2>Driveza - Map + Nearby Cars</h2>
+
+<pre id="authInfo" style="background:#f6f6f6; padding:10px; border:1px solid #ddd;"></pre>
+
+<div id="activeRentalBox" style="margin: 16px 0;"></div>
+
+<!-- Search + filter controls -->
+<div class="controls">
+    <input id="placeSearch" placeholder="Search street / place..." style="width:280px;" />
+    <input id="q" placeholder="Search model/brand" style="width:220px;" />
+
+    <label>Sort:
+        <select id="sort">
+            <option value="distance" selected>Distance</option>
+            <option value="price">Price</option>
+        </select>
+    </label>
+
+    <label>Radius:
+        <select id="radius">
+            <option value="1">1 km</option>
+            <option value="3" selected>3 km</option>
+            <option value="5">5 km</option>
+            <option value="10">10 km</option>
+        </select>
+    </label>
+
+    <label>Page size:
+        <select id="size">
+            <option value="5" selected>5</option>
+            <option value="10">10</option>
+        </select>
+    </label>
+
+    <button onclick="loadNearby(0)">Search</button>
+    <button onclick="seedCars()">Seed sample cars</button>
+    <button onclick="logout()" style="margin-left:auto;">Logout</button>
+</div>
+
+<div style="margin-top:8px; font-size:12px; color:#444;">
+    Current center: <span id="centerInfo"></span>
+    <br/>Tip: click on the map to set a new center.
+</div>
+
+<div id="map"></div>
+
+<div id="carsList" style="margin-top:16px;"></div>
+
+<div style="margin-top:12px;">
+    <button onclick="prevPage()">Prev</button>
+    <span id="pageInfo" style="margin:0 10px;"></span>
+    <button onclick="nextPage()">Next</button>
+</div>
+
+<pre id="result" style="margin-top:16px; background:#111; color:#0f0; padding:10px; overflow:auto;"></pre>
+
+<!-- Load Google Maps JS API (includes Places) -->
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBkUIjOE6Cy4o3EhDJO75I1JNkLrI0BxmQ&libraries=places"></script>
 
 <script>
-    async function callPing() {
+    // =========================
+    // STATE
+    // =========================
+    let currentPage = 0;
+    let map, centerMarker;
+    let carMarkers = [];
+
+    // default center (Riga) until user clicks / searches
+    const center = { lat: 56.9496, lng: 24.1052 };
+
+    // =========================
+    // AUTH
+    // =========================
+    function tokenInfo() {
         const token = localStorage.getItem("idToken");
-        const res = await fetch("/api/ping", {
+        const authInfo = document.getElementById("authInfo");
+
+        if (!token || token.length < 50) {
+            authInfo.innerText = "No token found ❌\nGo to /login and login again.";
+            return null;
+        }
+
+        authInfo.innerText =
+            "Token OK ✅ (length=" + token.length + ")\n" +
+            "Token preview: " + token.substring(0, 25) + "...";
+        return token;
+    }
+
+    function logout() {
+        localStorage.removeItem("idToken");
+        window.location.href = "/login";
+    }
+    window.logout = logout;
+
+    // =========================
+    // DEV: SEED
+    // =========================
+    async function seedCars() {
+        const token = tokenInfo();
+        if (!token) return;
+
+        const res = await fetch("/api/dev/seed-cars", {
+            method: "POST",
             headers: { "Authorization": "Bearer " + token }
         });
-        document.getElementById("pingResult").innerText =
-            "Status: " + res.status + "\nBody: " + await res.text();
+
+        const body = await res.text();
+        document.getElementById("result").innerText = "Seed Status: " + res.status + "\n" + body;
+
+        if (res.status === 200) loadNearby(0);
     }
+    window.seedCars = seedCars;
+
+    // =========================
+    // RENTAL BOX
+    // =========================
+    async function getMyActiveRental() {
+        const token = tokenInfo();
+        if (!token) return null;
+
+        const res = await fetch("/api/rentals/my-active", {
+            headers: { "Authorization": "Bearer " + token }
+        });
+
+        if (res.status !== 200) return null;
+
+        const text = await res.text();
+        if (!text || text === "null") return null;
+
+        try { return JSON.parse(text); } catch { return null; }
+    }
+
+    async function showActiveRental() {
+        const box = document.getElementById("activeRentalBox");
+        const rental = await getMyActiveRental();
+
+        if (!rental || !rental.id) {
+            box.innerHTML = "";
+            return;
+        }
+
+        box.innerHTML = `
+      <div style="border:2px solid #2e7d32; padding:12px; background:#e8f5e9;">
+        <b>Active Rental</b><br/>
+        Rental ID: ${rental.id}<br/>
+        Car ID: ${rental.carId}<br/>
+        Status: ${rental.status}<br/>
+        <button onclick="returnCar('${rental.id}')" style="margin-top:8px;">Return Car</button>
+      </div>
+    `;
+    }
+
+    async function returnCar(rentalId) {
+        const token = tokenInfo();
+        if (!token) return;
+
+        const res = await fetch(`/api/rentals/${rentalId}/return`, {
+            method: "POST",
+            headers: {
+                "Authorization": "Bearer " + token,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                dropLat: center.lat,
+                dropLng: center.lng,
+                dropAddress: "Drop Point (Map Center)"
+            })
+        });
+
+        const body = await res.text();
+        document.getElementById("result").innerText = "Return Status: " + res.status + "\n" + body;
+
+        if (res.status === 200) {
+            await showActiveRental();
+            await loadNearby(0);
+        } else {
+            alert("Return failed:\n" + body);
+        }
+    }
+    window.returnCar = returnCar;
+
+    // =========================
+    // MAP INIT + PLACE SEARCH
+    // =========================
+    function initMap() {
+        document.getElementById("centerInfo").innerText = `${center.lat.toFixed(5)}, ${center.lng.toFixed(5)}`;
+
+        map = new google.maps.Map(document.getElementById("map"), {
+            center,
+            zoom: 13
+        });
+
+        centerMarker = new google.maps.Marker({
+            position: center,
+            map,
+            title: "Search center"
+        });
+
+        // click to set new center
+        map.addListener("click", (e) => {
+            center.lat = e.latLng.lat();
+            center.lng = e.latLng.lng();
+            centerMarker.setPosition(center);
+            document.getElementById("centerInfo").innerText = `${center.lat.toFixed(5)}, ${center.lng.toFixed(5)}`;
+            loadNearby(0);
+        });
+
+        // Places autocomplete
+        const input = document.getElementById("placeSearch");
+        const autocomplete = new google.maps.places.Autocomplete(input, {
+            fields: ["geometry", "name", "formatted_address"]
+        });
+
+        autocomplete.addListener("place_changed", () => {
+            const place = autocomplete.getPlace();
+            if (!place.geometry || !place.geometry.location) return;
+
+            center.lat = place.geometry.location.lat();
+            center.lng = place.geometry.location.lng();
+
+            map.panTo(center);
+            map.setZoom(14);
+
+            centerMarker.setPosition(center);
+            document.getElementById("centerInfo").innerText = `${center.lat.toFixed(5)}, ${center.lng.toFixed(5)}`;
+
+            loadNearby(0);
+        });
+    }
+
+    // =========================
+    // NEARBY + MARKERS + LIST
+    // =========================
+    async function loadNearby(page) {
+        const token = tokenInfo();
+        if (!token) return;
+
+        currentPage = page;
+
+        document.getElementById("q").addEventListener("input", () => loadNearby(0));
+        document.getElementById("sort").addEventListener("change", () => loadNearby(0));
+        document.getElementById("radius").addEventListener("change", () => loadNearby(0));
+        document.getElementById("size").addEventListener("change", () => loadNearby(0));
+
+        const url =
+            `/api/cars/nearby?lat=${center.lat}&lng=${center.lng}` +
+            `&radiusKm=${radiusKm}&q=${encodeURIComponent(q)}` +
+            `&sort=${sort}&page=${currentPage}&size=${size}`;
+
+        const res = await fetch(url, {
+            headers: { "Authorization": "Bearer " + token }
+        });
+
+        const bodyText = await res.text();
+        document.getElementById("result").innerText = "Nearby Status: " + res.status + "\n" + bodyText;
+
+        if (res.status !== 200) return;
+
+        const cars = JSON.parse(bodyText);
+        await renderCars(cars);
+        renderCarMarkers(cars);
+
+        document.getElementById("pageInfo").innerText = `Page ${currentPage + 1}`;
+    }
+    window.loadNearby = loadNearby;
+
+    function clearMarkers() {
+        carMarkers.forEach(m => m.setMap(null));
+        carMarkers = [];
+    }
+
+    function renderCarMarkers(cars) {
+        if (!map) return;
+        clearMarkers();
+
+        cars.forEach(c => {
+            const marker = new google.maps.Marker({
+                position: { lat: c.lat, lng: c.lng },
+                map,
+                title: `${c.brand} ${c.model}`
+            });
+
+            const info = new google.maps.InfoWindow({
+                content: `
+          <div style="font-family:Arial;">
+            <b>${c.brand} ${c.model}</b><br/>
+            Distance: ${Number(c.distanceKm).toFixed(2)} km<br/>
+            <button onclick="rentCar('${c.id}')">Rent</button>
+          </div>
+        `
+            });
+
+            marker.addListener("click", () => info.open({ anchor: marker, map }));
+            carMarkers.push(marker);
+        });
+    }
+
+    async function renderCars(cars) {
+        const el = document.getElementById("carsList");
+        const activeRental = await getMyActiveRental();
+        const hasActive = activeRental && activeRental.status === "ACTIVE";
+
+        if (!cars || cars.length === 0) {
+            el.innerHTML = "<p>No cars found in this radius.</p>";
+            return;
+        }
+
+        el.innerHTML = cars.map(c => {
+            const dist = Number(c.distanceKm || 0).toFixed(2);
+            const disabled = hasActive ? "disabled" : "";
+            const btnText = hasActive ? "Already Renting" : "Rent";
+
+            return `
+        <div class="card">
+          <b>${c.brand || ""} ${c.model || ""}</b><br/>
+          Distance: ${dist} km<br/>
+          Price/Km: ${c.pricePerKm} | Price/Time: ${c.pricePerTime}<br/>
+          Fuel: ${c.fuelType || "-"}<br/>
+          <button ${disabled} onclick="rentCar('${c.id}')">${btnText}</button>
+        </div>
+      `;
+        }).join("");
+    }
+
+    async function rentCar(carId) {
+        const token = tokenInfo();
+        if (!token) return;
+
+        const res = await fetch("/api/rentals", {
+            method: "POST",
+            headers: {
+                "Authorization": "Bearer " + token,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                carId: carId,
+                pickupLat: center.lat,
+                pickupLng: center.lng,
+                pickupAddress: "Pickup Point (Map Center)"
+            })
+        });
+
+        const body = await res.text();
+        document.getElementById("result").innerText = "Rent Status: " + res.status + "\n" + body;
+
+        if (res.status === 200) {
+            alert("Car rented successfully ✅");
+            await showActiveRental();
+            await loadNearby(0);
+        } else {
+            alert("Rent failed ❌\n" + body);
+        }
+    }
+    window.rentCar = rentCar;
+
+    // =========================
+    // PAGINATION
+    // =========================
+    function nextPage() { loadNearby(currentPage + 1); }
+    function prevPage() { if (currentPage > 0) loadNearby(currentPage - 1); }
+    window.nextPage = nextPage;
+    window.prevPage = prevPage;
+
+    // =========================
+    // INIT
+    // =========================
+    tokenInfo();
+    initMap();
+    showActiveRental();
+    loadNearby(0);
 </script>
+
+</body>
+</html>

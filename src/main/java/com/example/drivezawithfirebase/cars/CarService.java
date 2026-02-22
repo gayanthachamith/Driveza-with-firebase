@@ -1,7 +1,5 @@
 package com.example.drivezawithfirebase.cars;
 
-
-
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.QueryDocumentSnapshot;
 import org.springframework.stereotype.Service;
@@ -20,9 +18,9 @@ public class CarService {
         if (car.getStatus() == null || car.getStatus().isBlank()) {
             car.setStatus("AVAILABLE");
         }
-        var docRef = db.collection("cars").document(); // auto id
-        car.setId(docRef.getId());
-        docRef.set(car).get();
+        var doc = db.collection("cars").document();
+        car.setId(doc.getId());
+        doc.set(car).get();
         return car.getId();
     }
 
@@ -30,38 +28,36 @@ public class CarService {
                                                 String q, String sort,
                                                 int page, int size) throws Exception {
 
-        // MVP approach: read AVAILABLE cars then filter in memory
-        var snapshots = db.collection("cars")
+        var snaps = db.collection("cars")
                 .whereEqualTo("status", "AVAILABLE")
                 .get().get();
 
-        List<Map<String, Object>> result = new ArrayList<>();
+        List<Map<String, Object>> list = new ArrayList<>();
 
-        for (QueryDocumentSnapshot doc : snapshots) {
+        for (QueryDocumentSnapshot doc : snaps) {
             Car car = doc.toObject(Car.class);
             car.setId(doc.getId());
 
-            double distKm = haversineKm(lat, lng, car.getLat(), car.getLng());
-            if (distKm <= radiusKm) {
-                Map<String, Object> row = new HashMap<>();
+            double dist = haversineKm(lat, lng, car.getLat(), car.getLng());
+            if (dist <= radiusKm) {
+                Map<String, Object> row = new LinkedHashMap<>();
                 row.put("id", car.getId());
                 row.put("brand", car.getBrand());
                 row.put("model", car.getModel());
-                row.put("status", car.getStatus());
                 row.put("pricePerKm", car.getPricePerKm());
                 row.put("pricePerTime", car.getPricePerTime());
                 row.put("fuelType", car.getFuelType());
                 row.put("lat", car.getLat());
                 row.put("lng", car.getLng());
-                row.put("distanceKm", distKm);
-                result.add(row);
+                row.put("distanceKm", dist);
+                list.add(row);
             }
         }
 
-        // search by model
+        // search
         if (q != null && !q.isBlank()) {
             String qq = q.toLowerCase();
-            result.removeIf(r -> {
+            list.removeIf(r -> {
                 String model = String.valueOf(r.getOrDefault("model", "")).toLowerCase();
                 String brand = String.valueOf(r.getOrDefault("brand", "")).toLowerCase();
                 return !(model.contains(qq) || brand.contains(qq));
@@ -70,16 +66,16 @@ public class CarService {
 
         // sort
         if ("price".equalsIgnoreCase(sort)) {
-            result.sort(Comparator.comparingDouble(r -> ((Number) r.getOrDefault("pricePerKm", 0)).doubleValue()));
+            list.sort(Comparator.comparingDouble(r -> ((Number) r.get("pricePerKm")).doubleValue()));
         } else {
-            result.sort(Comparator.comparingDouble(r -> ((Number) r.getOrDefault("distanceKm", 0)).doubleValue()));
+            list.sort(Comparator.comparingDouble(r -> ((Number) r.get("distanceKm")).doubleValue()));
         }
 
         // paginate
         int from = Math.max(0, page * size);
-        int to = Math.min(result.size(), from + size);
-        if (from >= result.size()) return List.of();
-        return result.subList(from, to);
+        int to = Math.min(list.size(), from + size);
+        if (from >= list.size()) return List.of();
+        return list.subList(from, to);
     }
 
     private double haversineKm(double lat1, double lon1, double lat2, double lon2) {

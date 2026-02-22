@@ -1,6 +1,5 @@
 package com.example.drivezawithfirebase.cars;
 
-
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -16,7 +15,6 @@ public class CarController {
         this.service = service;
     }
 
-    // USER: nearby cars
     @GetMapping("/cars/nearby")
     public List<Map<String, Object>> nearby(
             @RequestParam double lat,
@@ -30,10 +28,9 @@ public class CarController {
         return service.findNearby(lat, lng, radiusKm, q, sort, page, size);
     }
 
-    // TEMP admin create (we’ll lock to ADMIN soon)
+    // TEMP: for now (later admin-only)
     @PostMapping("/admin/cars")
-    public Map<String, String> createCar(@RequestBody Car car) throws Exception {
-        String id = service.createCar(car);
-        return Map.of("id", id);
+    public Map<String, String> create(@RequestBody Car car) throws Exception {
+        return Map.of("id", service.createCar(car));
     }
 }

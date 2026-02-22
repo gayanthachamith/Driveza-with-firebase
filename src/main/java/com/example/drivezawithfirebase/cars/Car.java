@@ -1,6 +1,5 @@
 package com.example.drivezawithfirebase.cars;
 
-
 public class Car {
     private String id;
     private String brand;
@@ -14,7 +13,6 @@ public class Car {
 
     public Car() {}
 
-    // getters/setters
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
 
